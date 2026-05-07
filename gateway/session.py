@@ -675,6 +675,8 @@ class SessionStore:
         self._loaded = False
         self._lock = threading.Lock()
         self._has_active_processes_fn = has_active_processes_fn
+        self._sqlite_needs_rebuild = False
+        self._jsonl_needs_rebuild = False
         
         # Initialize SQLite session database
         self._db = None
@@ -860,11 +862,7 @@ class SessionStore:
         """
         session_key = self._generate_session_key(source)
         now = _now()
-
-        # SQLite calls are made outside the lock to avoid holding it during I/O.
-        # All _entries / _loaded mutations are protected by self._lock.
         db_end_session_id = None
-        db_create_kwargs = None
 
         with self._lock:
             self._ensure_loaded_locked()
@@ -927,24 +925,28 @@ class SessionStore:
 
             self._entries[session_key] = entry
             self._save()
-            db_create_kwargs = {
-                "session_id": session_id,
-                "source": source.platform.value,
-                "user_id": source.user_id,
-            }
 
-        # SQLite operations outside the lock
-        if self._db and db_end_session_id:
-            try:
-                self._db.end_session(db_end_session_id, "session_reset")
-            except Exception as e:
-                logger.debug("Session DB operation failed: %s", e)
+            # SQLite operations must happen inside the lock to prevent a
+            # race where two threads generate different session_ids for the
+            # same session_key.  The underlying _insert_session_row uses
+            # INSERT OR IGNORE for idempotency (no-op if the row already
+            # exists), so retrying after a gateway restart is also safe.
+            if self._db:
+                try:
+                    self._db.create_session(
+                        session_id=session_id,
+                        source=source.platform.value,
+                        user_id=source.user_id,
+                    )
+                except Exception as e:
+                    print(f"[gateway] Warning: Failed to create SQLite session: {e}")
 
-        if self._db and db_create_kwargs:
-            try:
-                self._db.create_session(**db_create_kwargs)
-            except Exception as e:
-                print(f"[gateway] Warning: Failed to create SQLite session: {e}")
+            if was_auto_reset and db_end_session_id:
+                try:
+                    self._db.end_session(db_end_session_id, "session_reset")
+                except Exception as e:
+                    # end_session is best-effort; don't let it break the flow
+                    logger.debug("Session DB end_session failed: %s", e)
 
         return entry
 
@@ -1273,11 +1275,16 @@ class SessionStore:
                 )
             except Exception as e:
                 logger.debug("Session DB operation failed: %s", e)
+                self._sqlite_needs_rebuild = True
         
         # Also write legacy JSONL (keeps existing tooling working during transition)
         transcript_path = self.get_transcript_path(session_id)
-        with open(transcript_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(message, ensure_ascii=False) + "\n")
+        try:
+            with open(transcript_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(message, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.debug("Failed to write transcript JSONL: %s", e)
+            self._jsonl_needs_rebuild = True
     
     def rewrite_transcript(self, session_id: str, messages: List[Dict[str, Any]]) -> None:
         """Replace the entire transcript for a session with new messages.
@@ -1301,6 +1308,21 @@ class SessionStore:
 
     def load_transcript(self, session_id: str) -> List[Dict[str, Any]]:
         """Load all messages from a session's transcript."""
+        # Check dual-write consistency flags set by append_to_transcript
+        if self._sqlite_needs_rebuild or self._jsonl_needs_rebuild:
+            sources = []
+            if self._sqlite_needs_rebuild:
+                sources.append("SQLite")
+            if self._jsonl_needs_rebuild:
+                sources.append("JSONL")
+            logger.warning(
+                "Session %s: transcript data sources (%s) may be inconsistent "
+                "due to prior write failures — cross-source comparison recommended",
+                session_id, " and ".join(sources),
+            )
+            self._sqlite_needs_rebuild = False
+            self._jsonl_needs_rebuild = False
+
         db_messages = []
         # Try SQLite first
         if self._db:
