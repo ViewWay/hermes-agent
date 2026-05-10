@@ -28,6 +28,7 @@ import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Card } from "@/components/ui/card";
 
 import { ModelPickerDialog } from "@/components/ModelPickerDialog";
+import { SessionHud } from "@/components/SessionHud";
 import { ToolCall, type ToolEntry } from "@/components/ToolCall";
 import { GatewayClient, type ConnectionState } from "@/lib/gatewayClient";
 
@@ -40,6 +41,20 @@ interface SessionInfo {
   model?: string;
   provider?: string;
   credential_warning?: string;
+  usage?: {
+    input?: number;
+    output?: number;
+    cache_read?: number;
+    reasoning?: number;
+    context_used?: number;
+    context_max?: number;
+    context_percent?: number;
+    total?: number;
+    cost_usd?: number;
+    calls?: number;
+    compressions?: number;
+  };
+  session_start?: string;
 }
 
 interface RpcEnvelope {
@@ -303,7 +318,7 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
   return (
     <aside
       className={cn(
-        "flex h-full w-full min-w-0 shrink-0 flex-col gap-3 overflow-y-auto overflow-x-hidden pr-1 normal-case lg:w-80",
+        "flex h-full w-full min-w-0 shrink-0 flex-col gap-3 normal-case lg:w-80",
         className,
       )}
     >
@@ -355,12 +370,20 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
         </Card>
       )}
 
-      <Card className="flex min-h-0 flex-none flex-col px-2 py-2">
+      <Card className="px-3 py-2">
+        <SessionHud
+          usage={info.usage}
+          sessionStart={info.session_start}
+          model={info.model}
+        />
+      </Card>
+
+      <Card className="flex min-h-0 flex-1 flex-col px-2 py-2">
         <div className="px-1 pb-2 text-xs uppercase tracking-wider text-muted-foreground">
           tools
         </div>
 
-        <div className="flex min-h-0 flex-col gap-1.5">
+        <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-1">
           {tools.length === 0 ? (
             <div className="px-2 py-4 text-center text-xs text-muted-foreground">
               no tool calls yet

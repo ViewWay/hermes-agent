@@ -657,6 +657,9 @@ def drive_download(args):
     }
 
     out_path = Path(args.output).expanduser() if args.output else Path.cwd() / name
+    if out_path.exists() and not args.overwrite:
+        print(json.dumps({"error": f"File already exists: {out_path}", "existing_path": str(out_path)}))
+        return
 
     if mime in native_export_map:
         export_mime = args.export_mime or native_export_map[mime][0]

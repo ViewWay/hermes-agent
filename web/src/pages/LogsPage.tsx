@@ -1,11 +1,13 @@
 import {
+  type ReactNode,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useState,
   useCallback,
   useRef,
 } from "react";
-import { FileText, RefreshCw } from "lucide-react";
+import { FileText, RefreshCw, Search } from "lucide-react";
 import { api } from "@/lib/api";
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Button } from "@nous-research/ui/ui/components/button";
@@ -56,6 +58,8 @@ export default function LogsPage() {
   const [lines, setLines] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [useRegex, setUseRegex] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
   const { setAfterTitle, setEnd } = usePageHeader();
@@ -144,6 +148,19 @@ export default function LogsPage() {
     return () => clearInterval(interval);
   }, [autoRefresh, fetchLogs]);
 
+  const filteredLines = useMemo(() => {
+    if (!searchQuery.trim()) return lines;
+    try {
+      const re = useRegex
+        ? new RegExp(searchQuery, "i")
+        : new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      return lines.filter((line) => re.test(line));
+    } catch {
+      const lower = searchQuery.toLowerCase();
+      return lines.filter((line) => line.toLowerCase().includes(lower));
+    }
+  }, [lines, searchQuery, useRegex]);
+
   return (
     <div className="flex flex-col gap-4">
       <PluginSlot name="logs:top" />
@@ -190,6 +207,33 @@ export default function LogsPage() {
         </FilterGroup>
       </div>
 
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t.common.search}
+            className="h-8 w-full rounded-md border border-current/15 bg-transparent pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-current/30"
+          />
+        </div>
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+          <input
+            type="checkbox"
+            checked={useRegex}
+            onChange={(e) => setUseRegex(e.target.checked)}
+            className="rounded border-current/30"
+          />
+          Regex
+        </label>
+        {searchQuery && (
+          <span className="text-xs text-muted-foreground">
+            {filteredLines.length}/{lines.length}
+          </span>
+        )}
+      </div>
+
       <Card>
         <CardHeader className="py-3 px-4">
           <CardTitle className="text-sm flex items-center gap-2">
@@ -206,21 +250,41 @@ export default function LogsPage() {
 
           <div
             ref={scrollRef}
-            className="p-4 font-mono-ui text-xs leading-5 overflow-auto min-h-[400px] max-h-[calc(100vh-220px)]"
+            className="p-4 font-mono-ui text-xs leading-5 overflow-auto min-h-[400px] max-h-[calc(100vh-280px)]"
           >
-            {lines.length === 0 && !loading && (
+            {filteredLines.length === 0 && !loading && (
               <p className="text-muted-foreground text-center py-8">
-                {t.logs.noLogLines}
+                {searchQuery ? t.common.noResults : t.logs.noLogLines}
               </p>
             )}
-            {lines.map((line, i) => {
+            {filteredLines.map((line, i) => {
               const cls = classifyLine(line);
+              let content: ReactNode = line;
+              if (searchQuery.trim()) {
+                try {
+                  const re = useRegex
+                    ? new RegExp(`(${searchQuery})`, "gi")
+                    : new RegExp(`(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+                  const parts = line.split(re);
+                  content = parts.map((part, j) =>
+                    re.test(part) ? (
+                      <mark key={j} className="bg-yellow-500/30 text-foreground rounded px-0.5">
+                        {part}
+                      </mark>
+                    ) : (
+                      part
+                    ),
+                  );
+                } catch {
+                  content = line;
+                }
+              }
               return (
                 <div
                   key={i}
                   className={`${LINE_COLORS[cls]} hover:bg-secondary/20 px-1 -mx-1`}
                 >
-                  {line}
+                  {content}
                 </div>
               );
             })}

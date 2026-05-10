@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   Package,
   Search,
@@ -90,6 +90,52 @@ function toolsetIcon(
 }
 
 /* ------------------------------------------------------------------ */
+/*  Pagination                                                         */
+/* ------------------------------------------------------------------ */
+
+const SKILL_PAGE_SIZE = 20;
+
+function useSkillPagination() {
+  const [page, setPage] = useState(0);
+  const reset = useCallback(() => setPage(0), []);
+  const paginate = useCallback(
+    <T,>(items: T[]) => {
+      const totalPages = Math.max(1, Math.ceil(items.length / SKILL_PAGE_SIZE));
+      const safePage = Math.min(page, totalPages - 1);
+      const start = safePage * SKILL_PAGE_SIZE;
+      const end = Math.min(start + SKILL_PAGE_SIZE, items.length);
+      return { pageItems: items.slice(start, end), start, end, totalPages };
+    },
+    [page],
+  );
+  return { page, setPage, reset, paginate };
+}
+
+function SkillPaginationBar({ total, start, end, totalPages, page, onPage }: {
+  total: number; start: number; end: number; totalPages: number; page: number; onPage: (p: number) => void;
+}) {
+  const { t } = useI18n();
+  if (total <= SKILL_PAGE_SIZE) return null;
+
+  return (
+    <div className="flex items-center justify-between pt-3 mt-3 border-t border-border/50">
+      <span className="text-xs text-muted-foreground">
+        {t.analytics.showing.replace("{start}", String(start + 1)).replace("{end}", String(end)).replace("{total}", String(total))}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <Button size="xs" outlined disabled={page === 0} onClick={() => onPage(page - 1)}>
+          {t.analytics.prev}
+        </Button>
+        <span className="text-xs text-muted-foreground tabular-nums">{page + 1} / {totalPages}</span>
+        <Button size="xs" outlined disabled={page >= totalPages - 1} onClick={() => onPage(page + 1)}>
+          {t.analytics.next}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -104,6 +150,7 @@ export default function SkillsPage() {
   const { toast, showToast } = useToast();
   const { t } = useI18n();
   const { setAfterTitle, setEnd } = usePageHeader();
+  const { page, setPage, reset: resetPage, paginate } = useSkillPagination();
 
   useEffect(() => {
     Promise.all([api.getSkills(), api.getToolsets()])
@@ -278,6 +325,7 @@ export default function SkillsPage() {
                     setView("skills");
                     setActiveCategory(null);
                     setSearch("");
+                    resetPage();
                   }}
                 />
                 <PanelItem
@@ -306,9 +354,10 @@ export default function SkillsPage() {
                           <ListItem
                             key={key}
                             active={isActive}
-                            onClick={() =>
-                              setActiveCategory(isActive ? null : key)
-                            }
+                            onClick={() => {
+                              setActiveCategory(isActive ? null : key);
+                              resetPage();
+                            }}
                             className="rounded-sm px-2 py-1 text-[11px]"
                           >
                             <span className="flex-1 truncate">{name}</span>
@@ -398,19 +447,30 @@ export default function SkillsPage() {
                       ? t.skills.noSkills
                       : t.skills.noSkillsMatch}
                   </p>
-                ) : (
-                  <div className="grid gap-1">
-                    {activeSkills.map((skill) => (
-                      <SkillRow
-                        key={skill.name}
-                        skill={skill}
-                        toggling={togglingSkills.has(skill.name)}
-                        onToggle={() => handleToggleSkill(skill)}
-                        noDescriptionLabel={t.skills.noDescription}
+                ) : (() => {
+                  const { pageItems: pagedSkills, start, end, totalPages } = paginate(activeSkills);
+                  return (
+                    <div className="grid gap-1">
+                      {pagedSkills.map((skill) => (
+                        <SkillRow
+                          key={skill.name}
+                          skill={skill}
+                          toggling={togglingSkills.has(skill.name)}
+                          onToggle={() => handleToggleSkill(skill)}
+                          noDescriptionLabel={t.skills.noDescription}
+                        />
+                      ))}
+                      <SkillPaginationBar
+                        total={activeSkills.length}
+                        start={start}
+                        end={end}
+                        totalPages={totalPages}
+                        page={page}
+                        onPage={setPage}
                       />
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           ) : (

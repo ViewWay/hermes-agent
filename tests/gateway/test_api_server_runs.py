@@ -339,15 +339,20 @@ class TestRunEvents:
                 assert events_resp.status == 200
 
                 approval_event = None
-                for _ in range(20):
-                    line = await asyncio.wait_for(events_resp.content.readline(), timeout=3.0)
-                    text = line.decode()
-                    if not text.startswith("data: "):
-                        continue
-                    event = json.loads(text[len("data: "):])
-                    if event.get("event") == "approval.request":
-                        approval_event = event
-                        break
+
+                async def _poll_for_approval():
+                    nonlocal approval_event
+                    while True:
+                        line = await events_resp.content.readline()
+                        text = line.decode()
+                        if not text.startswith("data: "):
+                            continue
+                        event = json.loads(text[len("data: "):])
+                        if event.get("event") == "approval.request":
+                            approval_event = event
+                            return
+
+                await asyncio.wait_for(_poll_for_approval(), timeout=30.0)
 
                 assert approval_event is not None
                 assert approval_event["run_id"] == run_id

@@ -511,17 +511,9 @@ def _get_disabled_skill_names() -> Set[str]:
 
 
 def _get_session_platform() -> str:
-    """Resolve the current platform from gateway session context.
-
-    Mirrors the platform-resolution logic in
-    ``agent.skill_utils.get_disabled_skill_names`` so that
-    ``_is_skill_disabled`` respects ``HERMES_SESSION_PLATFORM``.
-    """
-    try:
-        from gateway.session_context import get_session_env
-        return get_session_env("HERMES_SESSION_PLATFORM") or ""
-    except Exception:
-        return ""
+    """Resolve the current platform from gateway session context."""
+    from gateway.session_context import get_session_platform
+    return get_session_platform()
 
 
 def _is_skill_disabled(name: str, platform: str = None) -> bool:

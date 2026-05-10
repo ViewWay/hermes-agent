@@ -86,12 +86,8 @@ def get_current_session_key(default: str = "default") -> str:
 
 def _get_session_platform() -> str:
     """Return the current gateway platform from contextvars/env fallback."""
-    try:
-        from gateway.session_context import get_session_env
-
-        return get_session_env("HERMES_SESSION_PLATFORM", "") or ""
-    except Exception:
-        return os.getenv("HERMES_SESSION_PLATFORM", "") or ""
+    from gateway.session_context import get_session_platform
+    return get_session_platform()
 
 
 def _is_gateway_approval_context() -> bool:

@@ -220,6 +220,44 @@ code { font-size: 0.875rem; }
    a CSS background; the default filler <img> is hidden to prevent
    double-compositing. Unset → initial → empty, so the :not() selector
    matches and the default image stays visible. */
+/* Observable Plot — tooltip theme fix.
+   Default tooltip: white background + currentColor text.
+   In dark themes currentColor ≈ light → invisible on white bg.
+   Override to use themed popover/card colors for readability. */
+.observable-plot-chart svg .plot-tip path {
+  fill: var(--color-popover) !important;
+  stroke: var(--color-border) !important;
+  fill-opacity: 0.95 !important;
+}
+.observable-plot-chart svg .plot-tip text,
+.observable-plot-chart svg .plot-tip tspan {
+  fill: var(--color-foreground) !important;
+}
+.observable-plot-chart svg g path[fill="white"],
+.observable-plot-chart svg g path[fill="#ffffff"],
+.observable-plot-chart svg g path[fill="#fff"] {
+  fill: var(--color-popover) !important;
+  stroke: var(--color-border) !important;
+  fill-opacity: 0.95 !important;
+}
+.observable-plot-chart svg g:has(path[fill="white"]) text,
+.observable-plot-chart svg g:has(path[fill="white"]) tspan,
+.observable-plot-chart svg g:has(path[fill="#ffffff"]) text,
+.observable-plot-chart svg g:has(path[fill="#ffffff"]) tspan,
+.observable-plot-chart svg g:has(path[fill="#fff"]) text,
+.observable-plot-chart svg g:has(path[fill="#fff"]) tspan {
+  fill: var(--color-foreground) !important;
+}
+.observable-plot-chart svg > g:last-of-type > path {
+  fill: var(--color-popover) !important;
+  stroke: var(--color-border) !important;
+  fill-opacity: 0.95 !important;
+}
+.observable-plot-chart svg > g:last-of-type text,
+.observable-plot-chart svg > g:last-of-type tspan {
+  fill: var(--color-foreground) !important;
+}
+
 :root:not([style*="--theme-asset-bg:"]) .theme-default-filler {
   display: block;
 }

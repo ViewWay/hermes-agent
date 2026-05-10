@@ -1,21 +1,4 @@
-// The dashboard can be served either at the root of its host (e.g.
-// https://kanban.tilos.com/) or under a URL prefix when reverse-proxied
-// (e.g. https://mission-control.tilos.com/hermes/). The Python backend
-// injects ``window.__HERMES_BASE_PATH__`` into index.html based on the
-// incoming ``X-Forwarded-Prefix`` header so the SPA can address its own
-// ``/api/...`` and ``/dashboard-plugins/...`` URLs correctly without a
-// rebuild. Empty string means "served at root".
-function readBasePath(): string {
-  if (typeof window === "undefined") return "";
-  const raw = window.__HERMES_BASE_PATH__ ?? "";
-  if (!raw) return "";
-  // Normalise: ensure leading slash, strip trailing slash.
-  const withLead = raw.startsWith("/") ? raw : `/${raw}`;
-  return withLead.replace(/\/+$/, "");
-}
-
-export const HERMES_BASE_PATH = readBasePath();
-const BASE = HERMES_BASE_PATH;
+const BASE = "";
 
 import type { DashboardTheme } from "@/themes/types";
 
@@ -24,11 +7,12 @@ import type { DashboardTheme } from "@/themes/types";
 declare global {
   interface Window {
     __HERMES_SESSION_TOKEN__?: string;
-    __HERMES_BASE_PATH__?: string;
   }
 }
 let _sessionToken: string | null = null;
 const SESSION_HEADER = "X-Hermes-Session-Token";
+// Track whether we've already triggered an auth-reload to avoid infinite loops.
+let _authReloadTriggered = false;
 
 function setSessionHeader(headers: Headers, token: string): void {
   if (!headers.has(SESSION_HEADER)) {
@@ -45,6 +29,14 @@ export async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> 
   }
   const res = await fetch(`${BASE}${url}`, { ...init, headers });
   if (!res.ok) {
+    // If the session token is stale (server restarted), reload the page
+    // once to pick up the fresh token from the new HTML response.
+    if (res.status === 401 && !_authReloadTriggered) {
+      _authReloadTriggered = true;
+      window.location.reload();
+      // Never resolves — the browser is navigating away.
+      return new Promise(() => {});
+    }
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`${res.status}: ${text}`);
   }
@@ -67,10 +59,6 @@ export const api = {
     fetchJSON<PaginatedSessions>(`/api/sessions?limit=${limit}&offset=${offset}`),
   getSessionMessages: (id: string) =>
     fetchJSON<SessionMessagesResponse>(`/api/sessions/${encodeURIComponent(id)}/messages`),
-  getSessionLatestDescendant: (id: string) =>
-    fetchJSON<SessionLatestDescendantResponse>(
-      `/api/sessions/${encodeURIComponent(id)}/latest-descendant`,
-    ),
   deleteSession: (id: string) =>
     fetchJSON<{ ok: boolean }>(`/api/sessions/${encodeURIComponent(id)}`, {
       method: "DELETE",
@@ -87,6 +75,13 @@ export const api = {
     fetchJSON<AnalyticsResponse>(`/api/analytics/usage?days=${days}`),
   getModelsAnalytics: (days: number) =>
     fetchJSON<ModelsAnalyticsResponse>(`/api/analytics/models?days=${days}`),
+  getSkillActivity: (days: number) =>
+    fetchJSON<SkillActivityResponse>(`/api/analytics/skill-activity?days=${days}`),
+  autoCleanupSkills: (days: number, dryRun: boolean) =>
+    fetchJSON<{ action: string; count: number; disabled?: string[]; would_disable?: string[] }>(
+      `/api/analytics/skill-activity/auto-cleanup?days=${days}&dry_run=${dryRun}`,
+      { method: "PUT" },
+    ),
   getConfig: () => fetchJSON<Record<string, unknown>>("/api/config"),
   getDefaults: () => fetchJSON<Record<string, unknown>>("/api/config/defaults"),
   getSchema: () => fetchJSON<{ fields: Record<string, unknown>; category_order: string[] }>("/api/config/schema"),
@@ -395,14 +390,6 @@ export interface SessionInfo {
   input_tokens: number;
   output_tokens: number;
   preview: string | null;
-  parent_session_id?: string | null;
-}
-
-export interface SessionLatestDescendantResponse {
-  requested_session_id: string;
-  session_id: string;
-  path: string[];
-  changed: boolean;
 }
 
 export interface PaginatedSessions {
@@ -461,6 +448,7 @@ export interface AnalyticsModelEntry {
   model: string;
   input_tokens: number;
   output_tokens: number;
+  cache_read_tokens: number;
   estimated_cost: number;
   sessions: number;
   api_calls: number;
@@ -473,6 +461,31 @@ export interface AnalyticsSkillEntry {
   total_count: number;
   percentage: number;
   last_used_at: number | null;
+}
+
+export interface SkillActivityEntry {
+  name: string;
+  description: string;
+  category: string;
+  enabled: boolean;
+  view_count: number;
+  manage_count: number;
+  total_count: number;
+  last_used_at: number | null;
+  status: "active" | "idle" | "never_used";
+}
+
+export interface SkillActivityResponse {
+  period_days: number;
+  skills: SkillActivityEntry[];
+  summary: {
+    total_skills: number;
+    active_count: number;
+    idle_count: number;
+    never_used_count: number;
+    enabled_count: number;
+    disabled_count: number;
+  };
 }
 
 export interface AnalyticsSkillsSummary {
@@ -499,6 +512,45 @@ export interface AnalyticsResponse {
     summary: AnalyticsSkillsSummary;
     top_skills: AnalyticsSkillEntry[];
   };
+  overview?: {
+    total_sessions?: number;
+    total_messages?: number;
+    total_tool_calls?: number;
+    total_input_tokens?: number;
+    total_output_tokens?: number;
+    total_cache_read_tokens?: number;
+    total_cache_write_tokens?: number;
+    total_tokens?: number;
+    estimated_cost?: number;
+    actual_cost?: number;
+    total_hours?: number;
+    avg_session_duration?: number;
+    avg_messages_per_session?: number;
+    avg_tokens_per_session?: number;
+    user_messages?: number;
+    assistant_messages?: number;
+    tool_messages?: number;
+  };
+  tools?: Array<{ tool: string; count: number; percentage: number }>;
+  activity?: {
+    by_day?: Array<{ day: string; count: number }>;
+    by_hour?: Array<{ hour: number; count: number }>;
+    busiest_day?: { day: string; count: number } | null;
+    busiest_hour?: { hour: number; count: number } | null;
+    active_days?: number;
+    max_streak?: number;
+  };
+  top_sessions?: Array<{ label: string; session_id: string; value: string; date: string }>;
+  platforms?: Array<{ platform: string; sessions: number; messages: number; input_tokens: number; output_tokens: number; total_tokens: number; tool_calls: number }>;
+  hourly_tokens?: Array<{
+    hour: number;
+    model: string;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    reasoning_tokens: number;
+    sessions: number;
+  }>;
 }
 
 export interface ProfileInfo {

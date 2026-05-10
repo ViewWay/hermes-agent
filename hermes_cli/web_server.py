@@ -2858,12 +2858,32 @@ async def get_usage_analytics(days: int = 30):
             "top_skills": [],
         })
 
+        # Hourly token consumption curve (0-23h), grouped by model
+        cur4 = db._conn.execute("""
+            SELECT cast(strftime('%H', datetime(started_at, 'unixepoch', 'localtime')) as integer) as hour,
+                   COALESCE(model, 'unknown') as model,
+                   SUM(input_tokens) as input_tokens,
+                   SUM(output_tokens) as output_tokens,
+                   SUM(cache_read_tokens) as cache_read_tokens,
+                   SUM(reasoning_tokens) as reasoning_tokens,
+                   COUNT(*) as sessions
+            FROM sessions WHERE started_at > ?
+            GROUP BY hour, COALESCE(model, 'unknown') ORDER BY hour
+        """, (cutoff,))
+        hourly_tokens = [dict(r) for r in cur4.fetchall()]
+
         return {
             "daily": daily,
             "by_model": by_model,
             "totals": totals,
             "period_days": days,
             "skills": skills,
+            "overview": insights_report.get("overview", {}),
+            "tools": insights_report.get("tools", []),
+            "activity": insights_report.get("activity", {}),
+            "top_sessions": insights_report.get("top_sessions", []),
+            "platforms": insights_report.get("platforms", []),
+            "hourly_tokens": hourly_tokens,
         }
     finally:
         db.close()

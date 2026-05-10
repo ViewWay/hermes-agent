@@ -291,8 +291,8 @@ class TestCronWithGatewayOrigin:
         finally:
             clear_session_vars(tokens)
 
-    def test_cron_with_telegram_origin_approve_mode_allows(self, monkeypatch):
-        """Cron + contextvar platform=telegram + cron_mode=approve → allowed via cron path."""
+    def test_cron_with_discord_origin_approve_mode_allows(self, monkeypatch):
+        """Cron + contextvar platform=discord + cron_mode=approve → allowed via cron path."""
         monkeypatch.setenv("HERMES_CRON_SESSION", "1")
         monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
         monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)

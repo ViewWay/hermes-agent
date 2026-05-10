@@ -152,3 +152,9 @@ def get_session_env(name: str, default: str = "") -> str:
             return value
     # Fall back to os.environ for CLI, cron, and test compatibility
     return os.getenv(name, default)
+
+
+def get_session_platform() -> str:
+    """Return the current gateway platform from contextvars with env fallback."""
+    import os
+    return get_session_env("HERMES_SESSION_PLATFORM", "") or os.getenv("HERMES_SESSION_PLATFORM", "") or ""

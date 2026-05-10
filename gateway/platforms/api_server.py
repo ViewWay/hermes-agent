@@ -2717,7 +2717,7 @@ class APIServerAdapter(BasePlatformAdapter):
             try:
                 loop.call_soon_threadsafe(q.put_nowait, event)
             except Exception:
-                pass
+                logger.warning("[api_server] failed to push %s event to run %s stream", event.get("event"), run_id)
 
         def _callback(event_type: str, tool_name: str = None, preview: str = None, args=None, **kwargs):
             ts = time.time()
@@ -2852,7 +2852,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     "delta": delta,
                 })
             except Exception:
-                pass
+                logger.warning("[api_server] failed to push delta event to run %s stream", run_id)
 
         self._set_run_status(
             run_id,
@@ -2890,7 +2890,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     try:
                         loop.call_soon_threadsafe(q.put_nowait, event)
                     except Exception:
-                        pass
+                        logger.warning("[api_server] failed to push approval.request event to run %s stream", run_id)
 
                 def _run_sync():
                     from gateway.session_context import clear_session_vars, set_session_vars
@@ -2987,14 +2987,14 @@ class APIServerAdapter(BasePlatformAdapter):
                         "timestamp": time.time(),
                     })
                 except Exception:
-                    pass
+                    logger.warning("[api_server] failed to push run.cancelled event to run %s stream", run_id)
                 raise
             except Exception as exc:
                 logger.exception("[api_server] run %s failed", run_id)
                 self._set_run_status(
                     run_id,
                     "failed",
-                    error=str(exc),
+                    error="Run failed due to an internal error",
                     last_event="run.failed",
                 )
                 try:
@@ -3002,10 +3002,10 @@ class APIServerAdapter(BasePlatformAdapter):
                         "event": "run.failed",
                         "run_id": run_id,
                         "timestamp": time.time(),
-                        "error": str(exc),
+                        "error": "Run failed due to an internal error",
                     })
                 except Exception:
-                    pass
+                    logger.warning("[api_server] failed to push run.failed event to run %s stream", run_id)
             finally:
                 # If the asyncio wrapper is cancelled (for example via
                 # /stop), the executor thread can still be blocked waiting
@@ -3017,12 +3017,12 @@ class APIServerAdapter(BasePlatformAdapter):
 
                     unregister_gateway_notify(approval_session_key)
                 except Exception:
-                    pass
+                    logger.warning("[api_server] failed to unregister gateway notify for run %s", run_id)
                 # Sentinel: signal SSE stream to close
                 try:
                     q.put_nowait(None)
                 except Exception:
-                    pass
+                    logger.warning("[api_server] failed to send stream sentinel for run %s", run_id)
                 self._active_run_agents.pop(run_id, None)
                 self._active_run_tasks.pop(run_id, None)
                 self._run_approval_sessions.pop(run_id, None)
@@ -3163,7 +3163,10 @@ class APIServerAdapter(BasePlatformAdapter):
             )
         except Exception as exc:
             logger.exception("[api_server] approval resolution failed for run %s", run_id)
-            return web.json_response(_openai_error(str(exc)), status=500)
+            return web.json_response(
+                _openai_error("Internal server error during approval resolution"),
+                status=500,
+            )
 
         if resolved <= 0:
             return web.json_response(
@@ -3174,7 +3177,15 @@ class APIServerAdapter(BasePlatformAdapter):
                 status=409,
             )
 
-        self._set_run_status(run_id, "running", last_event="approval.responded")
+        if choice == "deny":
+            self._set_run_status(
+                run_id,
+                "failed",
+                last_event="approval.responded",
+                error="Run was denied by user",
+            )
+        else:
+            self._set_run_status(run_id, "running", last_event="approval.responded")
         q = self._run_streams.get(run_id)
         if q is not None:
             try:
